@@ -90,14 +90,15 @@ $('reportFile').addEventListener('change',async e=>{
   if(!currentSheet)throw new Error('Could not find the current month sheet.');
   const oldSheet=wb.SheetNames.find(s=>s.trim().toLowerCase()==='old');
   const clientRows=XLSX.utils.sheet_to_json(wb.Sheets[currentSheet.name],{defval:null,raw:true});
-  const outWb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(outWb,XLSX.utils.json_to_sheet(clientRows),'All Clients');
   const oldRows=XLSX.utils.sheet_to_json(wb.Sheets[oldSheet],{defval:null,raw:true});
   const oldLookup=new Map(oldRows.map(r=>[String(r['Cable Operator ID']??'').trim().toUpperCase(),num(r['Total Rental Amount'])]));
-  const changesRows=clientRows.filter(r=>String(r['Cable Operator ID']??'').trim()).map(r=>{const id=String(r['Cable Operator ID']).trim().toUpperCase();const prior=oldLookup.has(id)?oldLookup.get(id):null;return {'Cable Operator ID':r['Cable Operator ID'],'Company Name':r['Company Name']??'','Product':r['R-Soft/On-Net'],'Previous Rental':prior,'Current Rental':num(r['Total Rental Amount']),'Rental Change':prior!==null?num(r['Total Rental Amount'])-prior:null,'Final Payable':num(r['Final Payable']),'Adjustment (ADJ)':num(r['ADJ'])};});
-  XLSX.utils.book_append_sheet(outWb,XLSX.utils.json_to_sheet(changesRows),'Client Comparison');
+  const changesRows=clientRows.filter(r=>String(r['Cable Operator ID']??'').trim()).map(r=>{const id=String(r['Cable Operator ID']).trim().toUpperCase();const prior=oldLookup.has(id)?oldLookup.get(id):null;const current=num(r['Total Rental Amount']);return {'OPID':r['Cable Operator ID'],'Previous Rental':prior,'Current Rental':current,'Difference':prior!==null?current-prior:null};});
+  const outWb=XLSX.utils.book_new();
+  const comparisonSheet=XLSX.utils.json_to_sheet(changesRows,{header:['OPID','Previous Rental','Current Rental','Difference']});
+  ['B','C','D'].forEach(col=>{for(let row=2;row<=changesRows.length+1;row++){const cell=comparisonSheet[col+row];if(cell&&typeof cell.v==='number')cell.z='₹#,##,##0.00;[Red]-₹#,##,##0.00';}});
+  XLSX.utils.book_append_sheet(outWb,comparisonSheet,'Client Comparison');
   const bytes=XLSX.write(outWb,{bookType:'xlsx',type:'base64'});
-  clientWorkbookBase64=bytes;clientWorkbookName='All_Clients_'+currentSheet.name.replace(/[^a-z0-9-]/gi,'_')+'.xlsx';
+  clientWorkbookBase64=bytes;clientWorkbookName='Client_Rental_Comparison_'+currentSheet.name.replace(/[^a-z0-9-]/gi,'_')+'.xlsx';
   $('preview').srcdoc=reportHtml;setTimeout(fitPreview,50);$('previewBtn').disabled=false;$('sendBtn').disabled=false;
   status('sendStatus','Report generated and preview loaded from '+f.name+'. Review it before sending.','good');
  }catch(err){reportHtml='';status('sendStatus',err.message||String(err),'bad')}
