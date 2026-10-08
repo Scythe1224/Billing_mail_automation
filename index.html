@@ -13,7 +13,6 @@ main{max-width:1120px;margin:auto;padding:28px 18px 48px}.top{display:flex;justi
 </style></head>
 <body><main>
 <div class="top"><div><span class="badge">MICROSOFT GRAPH</span><h1>Billing Mail Dashboard</h1><p class="muted">Upload the rental workbook, generate the billing report automatically, preview it, and send it.</p></div><div class="actions"><button id="loginBtn">Sign in with Microsoft</button><button id="logoutBtn">Sign out</button></div></div>
-<div class="panel"><h2>1. Microsoft settings</h2><p class="hint">Use the Client ID from the “Billing Mail Automation” app registration. These settings stay in this browser only.</p><div class="grid"><div><label for="tenant">Directory (tenant) ID</label><input id="tenant" placeholder="Tenant ID from Entra Overview"></div><div><label for="client">Application (client) ID</label><input id="client" placeholder="Client ID from Entra Overview"></div></div><div class="actions" style="margin-top:12px"><button id="saveSettings">Save settings</button><span class="hint">Required delegated permissions: Mail.Send and User.Read.</span></div><div id="authStatus" class="status muted">Not signed in.</div></div>
 <div class="panel"><h2>2. Email details</h2><div class="grid"><div><label for="to">To email(s), comma-separated</label><input id="to" type="text" placeholder="client@example.com, accounts@example.com"></div><div><label for="cc">CC email(s), optional</label><input id="cc" type="text" placeholder="optional@example.com"></div></div><div style="margin-top:14px"><label for="subject">Subject</label><input id="subject" value="Monthly Billing Report"></div><div style="margin-top:14px"><label for="reportFile">Rental report Excel file</label><input id="reportFile" type="file" accept=".xlsx,.xls"><p class="hint">Upload the original rental workbook containing an <b>Old</b> sheet and a current-month sheet. The dashboard will generate the HTML report and load the preview automatically.</p></div><div class="actions"><button id="previewBtn" disabled>Regenerate preview</button><button id="sendBtn" class="primary" disabled>Send Mail</button></div><div id="sendStatus" class="status muted">Upload your rental Excel workbook to generate the report.</div></div>
 <div class="panel"><h2>3. Report preview</h2><iframe id="preview" title="Billing report preview" sandbox=""></iframe></div>
 <p class="hint">Security: this page uses Microsoft delegated sign-in and does not ask for or store your mailbox password or a client secret. Avoid using this page on a shared/public computer.</p>
@@ -22,6 +21,8 @@ main{max-width:1120px;margin:auto;padding:28px 18px 48px}.top{display:flex;justi
 const $=id=>document.getElementById(id);
 const SETTINGS='billingGraphSettings';
 let reportHtml='';
+let clientWorkbookBase64='';
+let clientWorkbookName='';
 let msalApp=null;
 function status(id,msg,kind='muted'){$(id).className='status '+kind;$(id).textContent=msg}
 function settings(){return JSON.parse(localStorage.getItem(SETTINGS)||'{}')}
@@ -51,7 +52,7 @@ function buildReport(wb){
  const ids=new Set(old.map(r=>r.__id).filter(Boolean)),curIds=new Set(cur.map(r=>r.__id).filter(Boolean));
  const added=cur.filter(r=>r.__id&&!ids.has(r.__id)),removed=old.filter(r=>r.__id&&!curIds.has(r.__id));
  const oldMap=new Map(old.filter(r=>r.__id).map(r=>[r.__id,r]));
- const changes=cur.filter(r=>r.__id&&oldMap.has(r.__id)).map(r=>({...r,oldRental:oldMap.get(r.__id).__rental,delta:r.__rental-oldMap.get(r.__id).__rental})).filter(r=>Math.abs(r.delta)>=1).sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta));
+ const allChanges=cur.filter(r=>r.__id&&oldMap.has(r.__id)).map(r=>({...r,oldRental:oldMap.get(r.__id).__rental,delta:r.__rental-oldMap.get(r.__id).__rental})).filter(r=>r.delta<=-1).sort((a,b)=>a.delta-b.delta); const changes=allChanges.slice(0,5);
  const clients=rows=>rows.length;
  const products=[...new Set([...old,...cur].map(r=>String(r['R-Soft/On-Net']||'(Unspecified)')))].sort();
  const rowsHtml=(rows,cols)=>rows.length?rows.map(r=>'<tr>'+cols.map(k=>'<td>'+esc(k==='__rental'?money(r[k]):k==='__payable'?money(r[k]):k==='delta'?money(r.delta):k==='oldRental'?money(r.oldRental):k==='Total Rental Amount'?money(r[k]):k==='Final Payable'?money(r[k]):r[k])+'</td>').join('')+'</tr>').join(''):'<tr><td colspan="'+cols.length+'">No records</td></tr>';
@@ -64,7 +65,7 @@ function buildReport(wb){
  html+=table('Product-wise client count',productRows,['product','old','current'],['Product','Old clients','Current clients']);
  html+=table('New clients this month',added,['Cable Operator ID','Company Name','R-Soft/On-Net','MINIMUM BILLING','Total Rental Amount'],['Operator ID','Company','Product','Minimum Billing','Rental']);
  html+=table('Discontinued clients',removed,['Cable Operator ID','Company Name','R-Soft/On-Net','MINIMUM BILLING','Total Rental Amount'],['Operator ID','Company','Product','Minimum Billing','Rental']);
- html+=table('Rental changes vs previous month',changes,['Cable Operator ID','Company Name','R-Soft/On-Net','oldRental','Total Rental Amount','delta'],['Operator ID','Company','Product','Old rental','Current rental','Change']);
+ html+=table('Top 5 Rental Reductions',changes,['Cable Operator ID','Company Name','R-Soft/On-Net','oldRental','Total Rental Amount','delta'],['Operator ID','Company','Product','Old rental','Current rental','Change']);
  html+='<p>Generated automatically from the uploaded rental workbook. Please review the figures before sending.</p></body></html>';
  return html;
 }
@@ -74,11 +75,19 @@ $('reportFile').addEventListener('change',async e=>{
  try{status('sendStatus','Reading workbook and generating report…');
   if(!window.XLSX)throw new Error('Excel reader did not load. Refresh the page and try again.');
   const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});
-  reportHtml=buildReport(wb);$('preview').srcdoc=reportHtml;$('previewBtn').disabled=false;$('sendBtn').disabled=false;
+  reportHtml=buildReport(wb);
+  const clientRows=wb.Sheets[current.name] ? XLSX.utils.sheet_to_json(wb.Sheets[current.name],{defval:null,raw:true}) : [];
+  const outWb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(outWb,XLSX.utils.json_to_sheet(clientRows),'All Clients');
+  const changesRows=cur.filter(r=>r.__id).map(r=>{const prior=old.find(o=>o.__id===r.__id);return {'Cable Operator ID':r['Cable Operator ID'],'Company Name':r['Company Name']??'','Product':r['R-Soft/On-Net'],'Previous Rental':prior?prior.__rental:null,'Current Rental':r.__rental,'Rental Change':prior?r.__rental-prior.__rental:null,'Final Payable':r.__payable,'Adjustment (ADJ)':r.__adj};});
+  XLSX.utils.book_append_sheet(outWb,XLSX.utils.json_to_sheet(changesRows),'Client Comparison');
+  const bytes=XLSX.write(outWb,{bookType:'xlsx',type:'base64'});
+  clientWorkbookBase64=bytes;clientWorkbookName='All_Clients_'+current.name.replace(/[^a-z0-9-]/gi,'_')+'.xlsx';
+  $('preview').srcdoc=reportHtml;$('previewBtn').disabled=false;$('sendBtn').disabled=false;
   status('sendStatus','Report generated and preview loaded from '+f.name+'. Review it before sending.','good');
  }catch(err){reportHtml='';status('sendStatus',err.message||String(err),'bad')}
 });
 $('previewBtn').addEventListener('click',()=>{if(!reportHtml)return;$('preview').srcdoc=reportHtml;status('sendStatus','Preview refreshed. Review the report before sending.','good')});
-$('sendBtn').addEventListener('click',async()=>{const recipients=$('to').value.split(',').map(x=>x.trim()).filter(Boolean);if(!recipients.length){status('sendStatus','Enter at least one recipient email address.','bad');return}if(!reportHtml){status('sendStatus','Choose and preview the generated HTML report first.','bad');return}if(!confirm('Send the billing report to: '+recipients.join(', ')+'?'))return;const b=$('sendBtn');b.disabled=true;status('sendStatus','Signing in and sending through Microsoft Graph…');try{const token=await acquireToken();const splitList=id=>$(id).value.split(',').map(x=>x.trim()).filter(Boolean).map(address=>({emailAddress:{address}}));const message={message:{subject:$('subject').value.trim()||'Monthly Billing Report',body:{contentType:'HTML',content:reportHtml},toRecipients:recipients.map(address=>({emailAddress:{address}})),ccRecipients:splitList('cc')},saveToSentItems:true};const res=await fetch('https://graph.microsoft.com/v1.0/me/sendMail',{method:'POST',headers:{Authorization:'Bearer '+token.accessToken,'Content-Type':'application/json'},body:JSON.stringify(message)});if(!res.ok){let details=await res.text();throw new Error('Graph returned '+res.status+': '+details)}status('sendStatus','Email accepted by Microsoft Graph. Check Sent Items in your signed-in mailbox.','good')}catch(e){status('sendStatus',e.message||String(e),'bad')}finally{b.disabled=false}});
+$('sendBtn').addEventListener('click',async()=>{const recipients=$('to').value.split(',').map(x=>x.trim()).filter(Boolean);if(!recipients.length){status('sendStatus','Enter at least one recipient email address.','bad');return}if(!reportHtml||!clientWorkbookBase64){status('sendStatus','Upload the rental Excel workbook and wait for the report to generate.','bad');return}if(!confirm('Send the billing report to: '+recipients.join(', ')+'?'))return;const b=$('sendBtn');b.disabled=true;status('sendStatus','Signing in and sending through Microsoft Graph…');try{const token=await acquireToken();const splitList=id=>$(id).value.split(',').map(x=>x.trim()).filter(Boolean).map(address=>({emailAddress:{address}}));const message={message:{subject:$('subject').value.trim()||'Monthly Billing Report',body:{contentType:'HTML',content:reportHtml},toRecipients:recipients.map(address=>({emailAddress:{address}})),ccRecipients:splitList('cc'),attachments:clientWorkbookBase64?[{ '@odata.type':'#microsoft.graph.fileAttachment',name:clientWorkbookName,contentType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',contentBytes:clientWorkbookBase64 }]:[]},saveToSentItems:true};const res=await fetch('https://graph.microsoft.com/v1.0/me/sendMail',{method:'POST',headers:{Authorization:'Bearer '+token.accessToken,'Content-Type':'application/json'},body:JSON.stringify(message)});if(!res.ok){let details=await res.text();throw new Error('Graph returned '+res.status+': '+details)}status('sendStatus','Email accepted by Microsoft Graph. Check Sent Items in your signed-in mailbox.','good')}catch(e){status('sendStatus',e.message||String(e),'bad')}finally{b.disabled=false}});
 loadSettings();
 </script></body></html>
