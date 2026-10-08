@@ -8,7 +8,7 @@
 <style>
 :root{color-scheme:dark;--bg:#0b1120;--panel:#111c30;--line:#2b3b55;--text:#edf4ff;--muted:#a7b5ca;--blue:#38bdf8;--green:#34d399;--red:#fca5a5}
 *{box-sizing:border-box}body{margin:0;background:linear-gradient(145deg,#0b1120,#13233c);font:15px/1.5 Segoe UI,Arial,sans-serif;color:var(--text)}
-main{max-width:1120px;margin:auto;padding:28px 18px 48px}.top{display:flex;justify-content:space-between;gap:18px;align-items:center;margin-bottom:22px}.top h1{margin:0;font-size:28px}.muted,.hint{color:var(--muted);font-size:13px}.panel{background:#111c30eF;border:1px solid var(--line);border-radius:18px;padding:20px;margin:16px 0;box-shadow:0 14px 40px #0003}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}label{display:block;font-size:13px;font-weight:700;margin:0 0 6px}input,textarea,select{width:100%;padding:11px 12px;border-radius:10px;border:1px solid #3b4c68;background:#0a1425;color:var(--text);font:inherit}input[type=file]{padding:9px}button{border:0;border-radius:10px;padding:11px 16px;font-weight:800;cursor:pointer;background:#263954;color:white}button.primary{background:linear-gradient(120deg,#0284c7,#0f9f83)}button:disabled{opacity:.45;cursor:not-allowed}.actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.status{margin-top:12px;white-space:pre-wrap}.good{color:var(--green)}.bad{color:var(--red)}iframe{display:block;width:100%;height:78vh;min-height:620px;max-height:none;border:1px solid var(--line);border-radius:12px;background:#252525;overflow:auto} .panel.preview-panel{overflow:visible;min-height:0} .preview-frame-wrap{width:100%;overflow:visible} .hidden{display:none}.badge{display:inline-block;padding:4px 9px;border-radius:99px;background:#17334a;color:#7dd3fc;font-size:12px;font-weight:700}
+main{max-width:1120px;margin:auto;padding:28px 18px 48px}.top{display:flex;justify-content:space-between;gap:18px;align-items:center;margin-bottom:22px}.top h1{margin:0;font-size:28px}.muted,.hint{color:var(--muted);font-size:13px}.panel{background:#111c30eF;border:1px solid var(--line);border-radius:18px;padding:20px;margin:16px 0;box-shadow:0 14px 40px #0003}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}label{display:block;font-size:13px;font-weight:700;margin:0 0 6px}input,textarea,select{width:100%;padding:11px 12px;border-radius:10px;border:1px solid #3b4c68;background:#0a1425;color:var(--text);font:inherit}input[type=file]{padding:9px}button{border:0;border-radius:10px;padding:11px 16px;font-weight:800;cursor:pointer;background:#263954;color:white}button.primary{background:linear-gradient(120deg,#0284c7,#0f9f83)}button:disabled{opacity:.45;cursor:not-allowed}.actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.status{margin-top:12px;white-space:pre-wrap}.good{color:var(--green)}.bad{color:var(--red)}iframe{display:block;width:100%;height:900px;min-height:900px;max-height:none;border:1px solid var(--line);border-radius:12px;background:#252525;overflow:hidden} .panel.preview-panel{overflow:visible;min-height:0} .preview-frame-wrap{width:100%;overflow:visible} .hidden{display:none}.badge{display:inline-block;padding:4px 9px;border-radius:99px;background:#17334a;color:#7dd3fc;font-size:12px;font-weight:700}
 @media(max-width:720px){.grid{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}main{padding:20px 12px}}
 </style></head>
 <body><main>
@@ -26,6 +26,8 @@ let clientWorkbookBase64='';
 let clientWorkbookName='';
 let msalApp=null;
 function status(id,msg,kind='muted'){$(id).className='status '+kind;$(id).textContent=msg}
+function fitPreview(){const frame=$('preview');try{const doc=frame.contentDocument;if(!doc)return;const h=Math.max(doc.documentElement.scrollHeight,doc.body?.scrollHeight||0,doc.documentElement.offsetHeight,doc.body?.offsetHeight||0);if(h>0)frame.style.height=(h+24)+'px'}catch(e){frame.style.height='1200px'}}
+$('preview').addEventListener('load',()=>{fitPreview();setTimeout(fitPreview,250);setTimeout(fitPreview,900)});
 function settings(){return JSON.parse(localStorage.getItem(SETTINGS)||'{}')}
 function loadSettings(){}
 function updateLoginStatus(account){
@@ -96,7 +98,7 @@ $('reportFile').addEventListener('change',async e=>{
   XLSX.utils.book_append_sheet(outWb,XLSX.utils.json_to_sheet(changesRows),'Client Comparison');
   const bytes=XLSX.write(outWb,{bookType:'xlsx',type:'base64'});
   clientWorkbookBase64=bytes;clientWorkbookName='All_Clients_'+currentSheet.name.replace(/[^a-z0-9-]/gi,'_')+'.xlsx';
-  $('preview').srcdoc=reportHtml;$('previewBtn').disabled=false;$('sendBtn').disabled=false;
+  $('preview').srcdoc=reportHtml;setTimeout(fitPreview,50);$('previewBtn').disabled=false;$('sendBtn').disabled=false;
   status('sendStatus','Report generated and preview loaded from '+f.name+'. Review it before sending.','good');
  }catch(err){reportHtml='';status('sendStatus',err.message||String(err),'bad')}
 });
