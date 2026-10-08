@@ -72,7 +72,7 @@ function buildReport(wb){
  html += `<h2>📊 Month-over-month comparison</h2>
  <div class="compare-cards">
   <div class="compare-card previous">
-   <div class="compare-title">🗓️ Previous Month · ${esc(oldSheet)}</div>
+   <div class="compare-title">🗓️ Previous Month · ${esc(oldName)}</div>
    <div class="compare-metric"><span>Total Rental Amount</span><strong>${money(sum(old,'__rental'))}</strong></div>
    <div class="compare-metric"><span>Final Payable</span><strong>${money(net(old))}</strong></div>
    <div class="compare-metric"><span>Total Clients</span><strong>${clients(old).toLocaleString('en-IN')}</strong></div>
