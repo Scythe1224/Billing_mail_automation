@@ -21,6 +21,7 @@ main{max-width:1120px;margin:auto;padding:28px 18px 48px}.top{display:flex;justi
 const $=id=>document.getElementById(id);
 const SETTINGS='billingGraphSettings';
 let reportHtml='';
+let generatedSubject='';
 let clientWorkbookBase64='';
 let clientWorkbookName='';
 let msalApp=null;
@@ -72,6 +73,8 @@ function buildReport(wb){
  html+=table('Discontinued clients',removed,['Cable Operator ID','Company Name','R-Soft/On-Net','MINIMUM BILLING','Total Rental Amount'],['Operator ID','Company','Product','Minimum Billing','Rental']);
  html+=table('Top 5 Rental Reductions',changes,['Cable Operator ID','Company Name','R-Soft/On-Net','oldRental','Total Rental Amount','delta'],['Operator ID','Company','Product','Previous Rental','Current Rental','Difference']);
  html+='<p>Generated automatically from the uploaded rental workbook. Please review the figures before sending.</p></body></html>';
+ const monthLabel=current.date.toLocaleDateString('en-US',{month:'long',year:'numeric'});
+ generatedSubject='Billing Update – '+monthLabel+' | Clients: '+cur.length.toLocaleString('en-IN')+' | Net Rental: '+money(net(cur))+' | '+removed.length+' Disc, '+allChanges.length+' Δ';
  return html;
 }
 $('reportFile').addEventListener('change',async e=>{
@@ -80,7 +83,7 @@ $('reportFile').addEventListener('change',async e=>{
  try{status('sendStatus','Reading workbook and generating report…');
   if(!window.XLSX)throw new Error('Excel reader did not load. Refresh the page and try again.');
   const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});
-  reportHtml=buildReport(wb);
+  reportHtml=buildReport(wb);$('subject').value=generatedSubject;
   const currentSheet=wb.SheetNames.filter(s=>s.trim().toLowerCase()!=='old').map(s=>({name:s,date:monthDate(s)})).filter(x=>x.date).sort((a,b)=>b.date-a.date)[0];
   if(!currentSheet)throw new Error('Could not find the current month sheet.');
   const oldSheet=wb.SheetNames.find(s=>s.trim().toLowerCase()==='old');
