@@ -12,7 +12,7 @@ main{max-width:1120px;margin:auto;padding:28px 18px 48px}.top{display:flex;justi
 @media(max-width:720px){.grid{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}main{padding:20px 12px}}
 </style></head>
 <body><main>
-<div class="top"><div><span class="badge">MICROSOFT GRAPH</span><h1>Billing Mail Dashboard</h1><p class="muted">Upload the rental workbook, generate the billing report automatically, preview it, and send it.</p></div><div class="actions"><button id="loginBtn">Sign in with Microsoft</button><button id="logoutBtn">Sign out</button></div></div>
+<div class="top"><div><span class="badge">MICROSOFT GRAPH</span><h1>Billing Mail Dashboard</h1><p class="muted">Upload the rental workbook, generate the billing report automatically, preview it, and send it.</p></div><div class="actions"><span id="loginStatus" class="badge" style="background:#3f1d2a;color:#fecaca">● Logged out</span><button id="loginBtn">Sign in with Microsoft</button><button id="logoutBtn">Sign out</button></div></div>
 <div class="panel"><h2>2. Email details</h2><div class="grid"><div><label for="to">To email(s), comma-separated</label><input id="to" type="text" placeholder="client@example.com, accounts@example.com"></div><div><label for="cc">CC email(s), optional</label><input id="cc" type="text" placeholder="optional@example.com"></div></div><div style="margin-top:14px"><label for="subject">Subject</label><input id="subject" value="Monthly Billing Report"></div><div style="margin-top:14px"><label for="reportFile">Rental report Excel file</label><input id="reportFile" type="file" accept=".xlsx,.xls"><p class="hint">Upload the original rental workbook containing an <b>Old</b> sheet and a current-month sheet. The dashboard will generate the HTML report and load the preview automatically.</p></div><div class="actions"><button id="previewBtn" disabled>Regenerate preview</button><button id="sendBtn" class="primary" disabled>Send Mail</button></div><div id="sendStatus" class="status muted">Upload your rental Excel workbook to generate the report.</div></div>
 <div class="panel"><h2>3. Report preview</h2><iframe id="preview" title="Billing report preview" sandbox=""></iframe></div>
 <p class="hint">Security: this page uses Microsoft delegated sign-in and does not ask for or store your mailbox password or a client secret. Avoid using this page on a shared/public computer.</p>
@@ -26,13 +26,18 @@ let clientWorkbookName='';
 let msalApp=null;
 function status(id,msg,kind='muted'){$(id).className='status '+kind;$(id).textContent=msg}
 function settings(){return JSON.parse(localStorage.getItem(SETTINGS)||'{}')}
-function saveSettings(){const s={tenant:$('tenant').value.trim(),client:$('client').value.trim()};if(!s.tenant||!s.client){status('authStatus','Enter both Tenant ID and Client ID.','bad');return}localStorage.setItem(SETTINGS,JSON.stringify(s));status('authStatus','Settings saved in this browser.','good');msalApp=null}
-function loadSettings(){const s=settings();$('tenant').value=s.tenant||'';$('client').value=s.client||''}
-async function getApp(){const s=settings();if(!s.tenant||!s.client)throw new Error('Save your Tenant ID and Client ID first.');if(!window.msal?.PublicClientApplication)throw new Error('Microsoft sign-in library did not load. Refresh and try again.');if(!msalApp){msalApp=new msal.PublicClientApplication({auth:{clientId:s.client,authority:'https://login.microsoftonline.com/'+s.tenant,redirectUri:location.origin+location.pathname.replace(/\/$/,'')+'/auth.html'},cache:{cacheLocation:'sessionStorage'}});await msalApp.initialize()}return msalApp}
-async function acquireToken(){const app=await getApp();let account=app.getAllAccounts()[0];if(!account){const login=await app.loginPopup({scopes:['User.Read','Mail.Send'],redirectUri:location.origin+location.pathname.replace(/\/$/,'')+'/auth.html'});account=login.account}try{return await app.acquireTokenSilent({account,scopes:['Mail.Send']})}catch(e){return await app.acquireTokenPopup({account,scopes:['Mail.Send'],redirectUri:location.origin+location.pathname.replace(/\/$/,'')+'/auth.html'})}}
-$('saveSettings').addEventListener('click',saveSettings);
-$('loginBtn').addEventListener('click',async()=>{try{status('authStatus','Opening Microsoft sign-in…');const r=await acquireToken();status('authStatus','Signed in as '+(r.account.username||'your Microsoft account')+'.','good')}catch(e){status('authStatus',e.message||String(e),'bad')}});
-$('logoutBtn').addEventListener('click',async()=>{try{const app=await getApp();const a=app.getAllAccounts()[0];if(a)await app.logoutPopup({account:a,mainWindowRedirectUri:location.href});status('authStatus','Signed out.','muted')}catch(e){status('authStatus',e.message||String(e),'bad')}});
+function loadSettings(){}
+function updateLoginStatus(account){
+ const el=$('loginStatus');
+ if(!el)return;
+ if(account){el.textContent='✓ Logged in: '+(account.username||account.name||'Microsoft account');el.style.background='#123d30';el.style.color='#a7f3d0';$('loginBtn').textContent='Connected';}
+ else{el.textContent='● Logged out';el.style.background='#3f1d2a';el.style.color='#fecaca';$('loginBtn').textContent='Sign in with Microsoft';}
+}
+
+async function getApp(){const s=settings();if(!s.tenant||!s.client)throw new Error('Tenant ID and Client ID are not configured in this browser. Restore the app settings in local storage or add a configuration section.');if(!window.msal?.PublicClientApplication)throw new Error('Microsoft sign-in library did not load. Refresh and try again.');if(!msalApp){msalApp=new msal.PublicClientApplication({auth:{clientId:s.client,authority:'https://login.microsoftonline.com/'+s.tenant,redirectUri:location.origin+location.pathname.replace(/\/$/,'')+'/auth.html'},cache:{cacheLocation:'sessionStorage'}});await msalApp.initialize()}return msalApp}
+async function acquireToken(){const app=await getApp();let account=app.getAllAccounts()[0];if(account)updateLoginStatus(account);if(!account){const login=await app.loginPopup({scopes:['User.Read','Mail.Send'],redirectUri:location.origin+location.pathname.replace(/\/$/,'')+'/auth.html'});account=login.account;updateLoginStatus(account)}try{return await app.acquireTokenSilent({account,scopes:['Mail.Send']})}catch(e){return await app.acquireTokenPopup({account,scopes:['Mail.Send'],redirectUri:location.origin+location.pathname.replace(/\/$/,'')+'/auth.html'})}}
+$('loginBtn').addEventListener('click',async()=>{try{status('sendStatus','Opening Microsoft sign-in…');const r=await acquireToken();updateLoginStatus(r.account);status('sendStatus','Signed in as '+(r.account.username||'your Microsoft account')+'.','good')}catch(e){status('sendStatus',e.message||String(e),'bad')}});
+$('logoutBtn').addEventListener('click',async()=>{try{const app=await getApp();const a=app.getAllAccounts()[0];if(a)await app.logoutPopup({account:a,mainWindowRedirectUri:location.href});updateLoginStatus(null);status('sendStatus','Signed out.','muted')}catch(e){status('sendStatus',e.message||String(e),'bad')}});
 
 function esc(v){return String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
 function money(n){n=Number(n)||0;return (n<0?'-':'')+'₹'+Math.abs(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
@@ -76,13 +81,18 @@ $('reportFile').addEventListener('change',async e=>{
   if(!window.XLSX)throw new Error('Excel reader did not load. Refresh the page and try again.');
   const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});
   reportHtml=buildReport(wb);
-  const clientRows=wb.Sheets[current.name] ? XLSX.utils.sheet_to_json(wb.Sheets[current.name],{defval:null,raw:true}) : [];
+  const currentSheet=wb.SheetNames.filter(s=>s.trim().toLowerCase()!=='old').map(s=>({name:s,date:monthDate(s)})).filter(x=>x.date).sort((a,b)=>b.date-a.date)[0];
+  if(!currentSheet)throw new Error('Could not find the current month sheet.');
+  const oldSheet=wb.SheetNames.find(s=>s.trim().toLowerCase()==='old');
+  const clientRows=XLSX.utils.sheet_to_json(wb.Sheets[currentSheet.name],{defval:null,raw:true});
   const outWb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(outWb,XLSX.utils.json_to_sheet(clientRows),'All Clients');
-  const changesRows=cur.filter(r=>r.__id).map(r=>{const prior=old.find(o=>o.__id===r.__id);return {'Cable Operator ID':r['Cable Operator ID'],'Company Name':r['Company Name']??'','Product':r['R-Soft/On-Net'],'Previous Rental':prior?prior.__rental:null,'Current Rental':r.__rental,'Rental Change':prior?r.__rental-prior.__rental:null,'Final Payable':r.__payable,'Adjustment (ADJ)':r.__adj};});
+  const oldRows=XLSX.utils.sheet_to_json(wb.Sheets[oldSheet],{defval:null,raw:true});
+  const oldLookup=new Map(oldRows.map(r=>[String(r['Cable Operator ID']??'').trim().toUpperCase(),num(r['Total Rental Amount'])]));
+  const changesRows=clientRows.filter(r=>String(r['Cable Operator ID']??'').trim()).map(r=>{const id=String(r['Cable Operator ID']).trim().toUpperCase();const prior=oldLookup.has(id)?oldLookup.get(id):null;return {'Cable Operator ID':r['Cable Operator ID'],'Company Name':r['Company Name']??'','Product':r['R-Soft/On-Net'],'Previous Rental':prior,'Current Rental':num(r['Total Rental Amount']),'Rental Change':prior!==null?num(r['Total Rental Amount'])-prior:null,'Final Payable':num(r['Final Payable']),'Adjustment (ADJ)':num(r['ADJ'])};});
   XLSX.utils.book_append_sheet(outWb,XLSX.utils.json_to_sheet(changesRows),'Client Comparison');
   const bytes=XLSX.write(outWb,{bookType:'xlsx',type:'base64'});
-  clientWorkbookBase64=bytes;clientWorkbookName='All_Clients_'+current.name.replace(/[^a-z0-9-]/gi,'_')+'.xlsx';
+  clientWorkbookBase64=bytes;clientWorkbookName='All_Clients_'+currentSheet.name.replace(/[^a-z0-9-]/gi,'_')+'.xlsx';
   $('preview').srcdoc=reportHtml;$('previewBtn').disabled=false;$('sendBtn').disabled=false;
   status('sendStatus','Report generated and preview loaded from '+f.name+'. Review it before sending.','good');
  }catch(err){reportHtml='';status('sendStatus',err.message||String(err),'bad')}
@@ -90,4 +100,5 @@ $('reportFile').addEventListener('change',async e=>{
 $('previewBtn').addEventListener('click',()=>{if(!reportHtml)return;$('preview').srcdoc=reportHtml;status('sendStatus','Preview refreshed. Review the report before sending.','good')});
 $('sendBtn').addEventListener('click',async()=>{const recipients=$('to').value.split(',').map(x=>x.trim()).filter(Boolean);if(!recipients.length){status('sendStatus','Enter at least one recipient email address.','bad');return}if(!reportHtml||!clientWorkbookBase64){status('sendStatus','Upload the rental Excel workbook and wait for the report to generate.','bad');return}if(!confirm('Send the billing report to: '+recipients.join(', ')+'?'))return;const b=$('sendBtn');b.disabled=true;status('sendStatus','Signing in and sending through Microsoft Graph…');try{const token=await acquireToken();const splitList=id=>$(id).value.split(',').map(x=>x.trim()).filter(Boolean).map(address=>({emailAddress:{address}}));const message={message:{subject:$('subject').value.trim()||'Monthly Billing Report',body:{contentType:'HTML',content:reportHtml},toRecipients:recipients.map(address=>({emailAddress:{address}})),ccRecipients:splitList('cc'),attachments:clientWorkbookBase64?[{ '@odata.type':'#microsoft.graph.fileAttachment',name:clientWorkbookName,contentType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',contentBytes:clientWorkbookBase64 }]:[]},saveToSentItems:true};const res=await fetch('https://graph.microsoft.com/v1.0/me/sendMail',{method:'POST',headers:{Authorization:'Bearer '+token.accessToken,'Content-Type':'application/json'},body:JSON.stringify(message)});if(!res.ok){let details=await res.text();throw new Error('Graph returned '+res.status+': '+details)}status('sendStatus','Email accepted by Microsoft Graph. Check Sent Items in your signed-in mailbox.','good')}catch(e){status('sendStatus',e.message||String(e),'bad')}finally{b.disabled=false}});
 loadSettings();
+(async()=>{try{if(window.msal?.PublicClientApplication){const app=await getApp();const account=app.getAllAccounts()[0];updateLoginStatus(account||null);}}catch(e){updateLoginStatus(null);}})();
 </script></body></html>
